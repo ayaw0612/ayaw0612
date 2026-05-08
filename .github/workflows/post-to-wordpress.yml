@@ -1,10 +1,10 @@
-name: WordPressに小説を投稿
+name: Post Novel to WordPress
 
 on:
   workflow_dispatch:
     inputs:
       status:
-        description: '投稿ステータス（draft=下書き / publish=公開）'
+        description: 'Post status (draft or publish)'
         required: true
         default: 'draft'
         type: choice
@@ -16,36 +16,41 @@ jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout novel content branch
+        uses: actions/checkout@v4
         with:
           ref: claude/update-wordpress-novel-0PYEY
 
-      - name: WordPressに投稿
+      - name: Post to WordPress
         env:
           WP_URL: ${{ secrets.WP_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASS: ${{ secrets.WP_PASS }}
+          POST_STATUS: ${{ inputs.status }}
         run: |
-          PAYLOAD=$(python3 -c "
-import json
-title = '静かな螺旋　マドリード・オープン決勝'
-content = open('content/madrid_finals_2.html').read()
-status = '${{ inputs.status }}'
-print(json.dumps({'title': title, 'content': content, 'status': status}))
-")
-          RESPONSE=$(curl -s -w '\n%{http_code}' \
+          PAYLOAD=$(python3 - <<'PYEOF'
+          import json, os
+          title = '静かな螺旋　マドリード・オープン決勝'
+          with open('content/madrid_finals_2.html') as f:
+              content = f.read()
+          status = os.environ['POST_STATUS']
+          print(json.dumps({'title': title, 'content': content, 'status': status}))
+          PYEOF
+          )
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
             -X POST "${WP_URL}/wp-json/wp/v2/posts" \
             -u "${WP_USER}:${WP_PASS}" \
-            -H 'Content-Type: application/json' \
+            -H "Content-Type: application/json" \
             -d "$PAYLOAD")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | head -n -1)
+          echo "HTTP Status: $HTTP_CODE"
           if [ "$HTTP_CODE" = "201" ]; then
             POST_ID=$(echo "$BODY" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
-            echo "✅ 投稿成功！ ID: $POST_ID"
-            echo "🔗 編集URL: ${WP_URL}/wp-admin/post.php?post=${POST_ID}&action=edit"
+            echo "Success! Post ID: $POST_ID"
+            echo "Edit URL: ${WP_URL}/wp-admin/post.php?post=${POST_ID}&action=edit"
           else
-            echo "❌ エラー (HTTP $HTTP_CODE)"
+            echo "Error:"
             echo "$BODY"
             exit 1
           fi
